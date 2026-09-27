@@ -1,0 +1,38 @@
+{
+  "name": "groundwork",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "bun@1.4.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "dotenvx run -f .env -- turbo dev",
+    "dev:api": "dotenvx run -f .env -- turbo dev --filter=@starter/api",
+    "dev:app": "dotenvx run -f .env -- turbo dev --filter=@starter/app",
+    "dev:web": "dotenvx run -f .env -- turbo dev --filter=@starter/web",
+    "build": "dotenvx run -f .env -- turbo build",
+    "start:api": "NODE_ENV=production dotenvx run -f .env -- bun run --no-env-file --cwd apps/api start",
+    "start:app": "NODE_ENV=production dotenvx run -f .env -- bun run --no-env-file --cwd apps/app start",
+    "start:web": "PORT=${PORT:-3002} NODE_ENV=production dotenvx run -f .env -- bun run --no-env-file --cwd apps/web start",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "typecheck": "turbo typecheck",
+    "test": "dotenvx run -f .env -- turbo test",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:generate": "dotenvx run -f .env -- turbo db:generate --filter=@starter/db",
+    "db:migrate": "dotenvx run -f .env -- turbo db:migrate --filter=@starter/db",
+    "db:seed": "dotenvx run -f .env -- turbo db:seed --filter=@starter/db",
+    "db:studio": "dotenvx run -f .env -- turbo db:studio --filter=@starter/db",
+    "check": "bun run lint && bun run typecheck && bun run test && bun run build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@dotenvx/dotenvx": "2.31.1",
+    "turbo": "2.11.4",
+    "typescript": "5.9.3"
+  }
+}

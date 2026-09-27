@@ -1,0 +1,2 @@
+# Dotenvx owns environment-file loading for every workspace.
+env = false
