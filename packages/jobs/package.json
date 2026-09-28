@@ -1,0 +1,30 @@
+{
+  "name": "@starter/jobs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "jobs:dev": "bun src/check-config.ts && trigger dev start --config trigger.config.ts",
+    "jobs:deploy": "bun src/check-config.ts && trigger deploy --config trigger.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "biome check src trigger.config.ts",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "@starter/db": "workspace:*",
+    "@trigger.dev/sdk": "4.6.4",
+    "drizzle-orm": "0.45.3",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "trigger.dev": "4.6.4",
+    "typescript": "5.9.3"
+  }
+}

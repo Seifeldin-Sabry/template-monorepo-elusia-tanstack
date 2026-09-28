@@ -1,3 +1,5 @@
+import type { LogLevel } from "./logger";
+
 export type ApiEnvironment = {
   databaseUrl: string;
   host: string;
@@ -6,6 +8,7 @@ export type ApiEnvironment = {
   authSecret: string;
   authCookieDomain?: string;
   allowedOrigins: string[];
+  logLevel: LogLevel;
 };
 
 export function readApiEnvironment(
@@ -110,6 +113,13 @@ export function readApiEnvironment(
     assertOrigin(origin, "CORS origin");
   }
 
+  const logLevel = env.LOG_LEVEL || "info";
+  if (!isLogLevel(logLevel)) {
+    throw new Error(
+      "LOG_LEVEL must be trace, debug, info, warn, error, fatal, or silent",
+    );
+  }
+
   return {
     databaseUrl,
     host,
@@ -118,7 +128,20 @@ export function readApiEnvironment(
     authSecret,
     ...(authCookieDomain ? { authCookieDomain } : {}),
     allowedOrigins,
+    logLevel,
   };
+}
+
+function isLogLevel(value: string): value is ApiEnvironment["logLevel"] {
+  return [
+    "trace",
+    "debug",
+    "info",
+    "warn",
+    "error",
+    "fatal",
+    "silent",
+  ].includes(value);
 }
 
 function assertOrigin(origin: string, name: string) {

@@ -335,6 +335,50 @@
   line-height: 1.5;
 }
 
+.auth-form-success {
+  margin: 0 0 19px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklch, var(--primary) 25%, var(--border));
+  border-radius: 5px;
+  background: color-mix(in oklch, var(--primary) 6%, var(--card));
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.auth-intro-standalone {
+  margin-top: clamp(70px, 9vw, 120px);
+}
+
+.auth-sub-actions {
+  margin-top: -11px;
+  text-align: right;
+}
+
+.auth-sub-actions a {
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.auth-sub-actions a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-recovery-status {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .auth-submit {
   justify-content: space-between;
   width: 100%;
@@ -359,6 +403,10 @@
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 1.6;
+}
+
+.auth-recovery-status + .auth-switch-copy {
+  margin-top: 25px;
 }
 
 .auth-switch-copy a {

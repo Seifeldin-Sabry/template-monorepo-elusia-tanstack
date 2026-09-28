@@ -55,7 +55,7 @@ integrationTest(
       projects: createProjectRepository(connection.db),
       auth,
       allowedOrigins: [appOrigin],
-      logger: { info() {}, error() {} },
+      logger: { info() {}, warn() {}, error() {} },
     });
     const userIds: string[] = [];
 

@@ -8,7 +8,9 @@ import {
   user,
   verification,
 } from "@starter/db";
+import type { EmailService } from "@starter/email";
 import { betterAuth } from "better-auth";
+import type { Logger } from "./logger";
 
 export type AuthEnvironment = {
   apiOrigin: string;
@@ -17,6 +19,8 @@ export type AuthEnvironment = {
   cookieDomain?: string;
   secondaryStorage?: BetterAuthSecondaryStorage;
   getClientIp?: (request: Request) => string | null;
+  email?: EmailService;
+  logger?: Logger;
 };
 
 export type AuthenticatedSession = {
@@ -25,11 +29,13 @@ export type AuthenticatedSession = {
 };
 
 export type AuthService = {
+  emailEnabled: boolean;
   handler(request: Request): Promise<Response>;
   getSession(headers: Headers): Promise<AuthenticatedSession | null>;
 };
 
 export function createAuth(db: Database, environment: AuthEnvironment) {
+  const email = environment.email;
   return betterAuth({
     baseURL: environment.apiOrigin,
     secret: environment.secret,
@@ -38,7 +44,58 @@ export function createAuth(db: Database, environment: AuthEnvironment) {
       provider: "pg",
       schema: { user, session, account, verification, rateLimit },
     }),
-    emailAndPassword: { enabled: true },
+    emailAndPassword: {
+      enabled: true,
+      ...(email?.enabled
+        ? {
+            requireEmailVerification: true,
+            sendResetPassword: async ({
+              user,
+              url,
+            }: {
+              user: { email: string; name: string };
+              url: string;
+            }) => {
+              await deliverAccountEmail(
+                () =>
+                  email.sendPasswordResetEmail({
+                    to: user.email,
+                    name: user.name,
+                    url,
+                  }),
+                environment.logger,
+                "password_reset_email_failed",
+              );
+            },
+          }
+        : {}),
+    },
+    ...(email?.enabled
+      ? {
+          emailVerification: {
+            sendOnSignUp: true,
+            sendOnSignIn: true,
+            sendVerificationEmail: async ({
+              user,
+              url,
+            }: {
+              user: { email: string; name: string };
+              url: string;
+            }) => {
+              await deliverAccountEmail(
+                () =>
+                  email.sendVerificationEmail({
+                    to: user.email,
+                    name: user.name,
+                    url,
+                  }),
+                environment.logger,
+                "verification_email_failed",
+              );
+            },
+          },
+        }
+      : {}),
     advanced: {
       // Auth handler receives a sanitized x-real-ip injected from Bun's socket.
       // Never trust the client's raw forwarding headers for rate-limit keys.
@@ -64,6 +121,19 @@ export function createAuth(db: Database, environment: AuthEnvironment) {
   });
 }
 
+async function deliverAccountEmail(
+  send: () => Promise<unknown>,
+  logger: Logger | undefined,
+  event: string,
+): Promise<void> {
+  try {
+    await send();
+  } catch (err) {
+    logger?.error({ event, err });
+    throw new Error("Email delivery failed");
+  }
+}
+
 export function createAuthService(
   db: Database,
   environment: AuthEnvironment,
@@ -71,6 +141,7 @@ export function createAuthService(
   const auth = createAuth(db, environment);
 
   return {
+    emailEnabled: environment.email?.enabled ?? false,
     handler(request) {
       const headers = new Headers(request.headers);
       headers.delete("x-real-ip");

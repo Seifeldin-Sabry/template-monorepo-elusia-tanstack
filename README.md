@@ -1,6 +1,6 @@
 # Groundwork
 
-Reusable full-stack starter with a Bun/Elysia API, two TanStack Start sites, and PostgreSQL. Projects CRUD shows the complete path from Drizzle through Elysia and typed Eden Treaty calls to a TanStack Query interface. Better Auth supplies email/password sessions. Optional integrations add Upstash Redis and Stripe billing with both subscriptions and one-time purchases.
+Reusable full-stack starter with a Bun/Elysia API, two TanStack Start sites, and PostgreSQL. Projects CRUD shows the complete path from Drizzle through Elysia and typed Eden Treaty calls to a TanStack Query interface. Better Auth supplies email/password sessions. Optional integrations add Upstash Redis, Resend email, Trigger.dev jobs, and Stripe billing with both subscriptions and one-time purchases.
 
 ## First run
 
@@ -28,19 +28,20 @@ PostgreSQL binds to localhost. If port 5432 is occupied, change `POSTGRES_PORT`,
 | `packages/db` | Drizzle schema, Postgres.js connection, SQL migrations, seed |
 | `packages/billing` | Stripe checkout, customer portal, webhook reconciliation |
 | `packages/cache` | Optional Upstash Redis cache and Better Auth rate-limit storage |
+| `packages/email` | Optional Resend delivery for verification and password reset |
+| `packages/jobs` | Optional Trigger.dev background task example |
 | `packages/ui` | Shared shadcn-style controls, Tailwind tokens, brand settings |
 
 The app imports `@starter/api/contract` as a **type only** and calls API routes through Eden Treaty. Its browser bundle contains no database or API runtime module. Query options define one projects cache key; `useCreateProject`, `useUpdateProject`, and `useDeleteProject` await invalidation on success. Server rendering uses a request-scoped QueryClient and forwards the session cookie for API reads.
 
 ## Environment
 
-Copy `.env.example` to ignored `.env`. Root development, build, test, and database scripts use dotenvx. `bunfig.toml` disables Bun's implicit `.env` loading, so dotenvx is the single file loader. API validates required settings at startup; app server validates origins before API requests. Keep secrets out of `VITE_` variables; those values are public in frontend builds. Turborepo declares task environment inputs for caching and process forwarding.
+Copy `.env.example` to ignored `.env` for local development. In staging and production, inject environment variables through the host or secret manager; an `.env` file is optional there. Root development, build, test, and database scripts use dotenvx. `bunfig.toml` disables Bun runtime's implicit `.env` loading, so runtime scripts receive file values through dotenvx. Bun's package manager can still inspect `.env` during installation. API validates required settings at startup; app server validates origins before API requests. Keep secrets out of `VITE_` variables; those values are public in frontend builds. Turborepo declares task environment inputs for caching and process forwarding.
 
 | Variable | Purpose |
 | --- | --- |
 | `POSTGRES_PORT` | Docker host port, default 5432 |
-| `DATABASE_URL` | API/seed PostgreSQL URL; use Neon pooled URL for hosted traffic |
-| `DATABASE_MIGRATION_URL` | Optional direct Neon URL for migrations; local setup falls back to `DATABASE_URL` |
+| `DATABASE_URL` | PostgreSQL URL used by API, seed, Drizzle generation, Studio, and migrations in the current environment |
 | `TEST_DATABASE_URL` | PostgreSQL integration-test URL; use an isolated disposable database outside local development |
 | `API_HOST`, `API_PORT` | Bun API listen address and port |
 | `API_ORIGIN` | Public API/Auth origin; Better Auth uses it as base URL |
@@ -54,22 +55,29 @@ Copy `.env.example` to ignored `.env`. Root development, build, test, and databa
 | `SEED_USER_EMAIL` | Existing registered email to receive sample project |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Optional Upstash pair; both or neither |
 | `REDIS_KEY_NAMESPACE` | Redis key prefix to separate deployments |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Optional Resend credential and verified sender address; both or neither |
+| `TRIGGER_PROJECT_REF`, `TRIGGER_SECRET_KEY` | Optional Trigger.dev project and server key; both or neither |
+| `LOG_LEVEL` | Minimum API JSON log level |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Optional Stripe test/live secret and signing secret |
 | `STRIPE_SUBSCRIPTION_PRICE_ID`, `STRIPE_ONE_TIME_PRICE_ID` | Server-owned recurring and one-time Price IDs |
 
-### Local PostgreSQL and Neon
+### PostgreSQL in each environment
 
-`bun run db:up` starts PostgreSQL 17 in Docker Compose. Same Postgres.js driver and migrations work with standard PostgreSQL and Neon. For Neon, set `DATABASE_URL` to a pooled connection string and `DATABASE_MIGRATION_URL` to a direct string. The migration command rejects a Neon pooler hostname when no direct URL is supplied. Never run integration tests against production data.
+Local development uses PostgreSQL 17 from Docker Compose. `bun run db:up` starts it; default `DATABASE_URL` in `.env.example` points to `localhost:5432`. If that port is occupied, change `POSTGRES_PORT`, `DATABASE_URL`, and `TEST_DATABASE_URL` together. Compose is only for local development. Staging and production can use Neon or any compatible hosted PostgreSQL service: set each deployment's `DATABASE_URL` to that environment's connection string, then run the same `bun run db:migrate` command before deploying API code. No provider-specific migration variable or driver is required. Include provider-required TLS settings in the URL. Confirm that the selected connection endpoint permits migration DDL; if a provider offers separate pooled and direct endpoints, choose its migration-capable endpoint for the migration job. Never run integration tests against production data.
 
-Change `packages/db/src/schema.ts` and related schema files, run `bun run db:generate`, review generated SQL, commit migration files, then run `bun run db:migrate`. Run migrations before a new API deployment. `db:studio` opens Drizzle Studio with the configured database.
+Change `packages/db/src/schema.ts` and related schema files, run `bun run db:generate`, review generated SQL, commit migration files, then run `bun run db:migrate` with target environment's `DATABASE_URL`. Runtime and migration processes can receive different values for that same variable if connection endpoints differ. `db:studio` opens Drizzle Studio with the configured database.
 
 ### Better Auth
 
 Email/password registration, sign-in, sign-out, and database-backed sessions work without another service. Projects and billing routes require a session; project records are scoped to the session user. Better Auth rate limits use PostgreSQL by default. With both Upstash values present, rate-limit counters use Redis while sessions remain in PostgreSQL. Partial Upstash configuration fails at API startup.
 
-Localhost works across the app/API ports. For HTTPS sibling hosts such as `app.example.com` and `api.example.com`, set `AUTH_COOKIE_DOMAIN=example.com`; both hosts must match that domain. If hosts belong to different registrable domains, place an API/auth reverse proxy on the app's origin to avoid third-party cookie failures. Keep `API_ORIGIN` public; use `API_INTERNAL_ORIGIN` only when the app server needs a private route to the API. At a public reverse proxy, strip client-supplied IP headers and configure Better Auth's trusted IP header settings for accurate per-client rate limits.
+Localhost works across the app/API ports. For HTTPS sibling hosts such as `app.example.com` and `api.example.com`, set `AUTH_COOKIE_DOMAIN=example.com`; both hosts must match that domain. If hosts belong to different registrable domains, place an API/auth reverse proxy on the app's origin to avoid third-party cookie failures. Keep `API_ORIGIN` public; use `API_INTERNAL_ORIGIN` only when the app server needs a private route to the API. API rate limits use Bun's direct socket IP and discard incoming forwarding headers. Behind a reverse proxy, that IP belongs to the proxy; add per-client rate limiting at the proxy if needed.
 
-This basic auth setup has no email verification, password-reset delivery, or social login. Add a mail provider and those flows before relying on verified email identity or supporting paid accounts at scale.
+Without Resend, signup works immediately and email verification and password-reset delivery remain off. Set both `RESEND_API_KEY` and `EMAIL_FROM` to enable verification on signup and password-reset emails; partial configuration fails at API startup. App shows check-inbox/resend and forgot/reset-password flows only when email delivery is enabled. Verify sender domain with Resend. Set both server-side `APP_ORIGIN` and build-time `VITE_APP_ORIGIN` to the same public app URL so verification and recovery links return to the correct host. Social login is not included.
+
+### API logging
+
+API emits one Pino JSON completion record per request with ISO timestamp, service, event, request ID, HTTP method, pathname without query, actual status, and duration in milliseconds. Startup, shutdown, enabled integrations, and unexpected errors use the same logger. `LOG_LEVEL=info` is the default; `trace`, `debug`, `warn`, `error`, `fatal`, and `silent` are also accepted. Request IDs return in `X-Request-ID` to correlate client reports with server logs. Logs omit request bodies and raw headers; common credential fields are redacted, and unexpected errors record exception names and call sites without their potentially sensitive messages. Forward stdout/stderr to the deployment's log collector and set its retention and access controls there.
 
 ### Stripe: subscriptions and one-time purchases
 
@@ -83,7 +91,32 @@ stripe listen --forward-to http://localhost:3001/billing/webhook
 
 Copy the printed `whsec_...` value into `STRIPE_WEBHOOK_SECRET`, restart API, then use Stripe test cards through the billing page. Configure the same webhook endpoint and event types in Stripe for deployment: `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, and `customer.subscription.created`, `.updated`, `.deleted`. Configure Customer Portal in Stripe before offering its link. No Stripe credentials are committed, and live payment processing needs a real Stripe account and webhook endpoint.
 
-Billing records demonstrate integration; they do not grant application entitlements yet. Add an explicit server-side entitlement check for paid product features. For production, add email recovery/verification and reconcile operational exceptions from Stripe Dashboard.
+Billing records demonstrate integration; they do not grant application entitlements yet. Add an explicit server-side entitlement check for paid product features. For production billing, enable email verification/recovery and reconcile operational exceptions from Stripe Dashboard.
+
+### Trigger.dev jobs
+
+Jobs are optional. With `TRIGGER_PROJECT_REF` and `TRIGGER_SECRET_KEY` unset, API runs without Trigger.dev and never publishes a task. With both set, creating a project attempts to enqueue a `project-created` task after the database write succeeds. The example task re-reads the committed project by owner and ID, then records a compact snapshot in Trigger.dev. Partial configuration fails at startup. Enqueue failure produces a warning while the saved project remains available; use a transactional outbox if future jobs must be delivered reliably.
+
+Create a Trigger.dev project and authenticate its CLI once with `bunx trigger.dev@4.6.4 login`. Put its project ref and development secret key in local `.env`, then run `bun run jobs:dev` alongside `bun run dev`. Local worker reads `DATABASE_URL` from `.env`. For staging or production, configure `DATABASE_URL` inside the matching Trigger.dev environment, set matching Trigger secret in the API environment, and deploy tasks separately with `bun run jobs:deploy` (production default). Trigger CLI login and API secret key serve different purposes. Job commands stay separate from core development and CI, which need no Trigger credentials.
+
+### Choose modules
+
+Core dependency path: product app calls the API through an Eden contract; API uses PostgreSQL through `packages/db`. Better Auth lives in the API and stores sessions in PostgreSQL. Both frontends share `packages/ui`; `apps/web` can be removed independently. API opts into `packages/cache`, `packages/email`, `packages/jobs`, and `packages/billing` at startup. Jobs use the database directly in their worker; billing owns its own database tables. Email and jobs have no dependency on each other.
+
+**Disable at runtime:** leave both Upstash, Resend, or Trigger credentials blank, or leave all four Stripe settings blank. Their packages remain installed, but core app still runs. Partial configuration fails fast. Keep provider secrets on API or worker servers, never in `VITE_` variables.
+
+**Remove code from a derivative project:**
+
+| Module | Files and wiring to remove |
+| --- | --- |
+| Upstash | Delete `packages/cache`; remove `@starter/cache` from `apps/api/package.json`, `createCache` and `secondaryStorage` wiring from `apps/api/src/server.ts`, and cache type/option from `apps/api/src/auth.ts`. Set Better Auth rate-limit storage to `database`. |
+| Resend | Delete `packages/email`; remove API package dependency and email setup in `apps/api/src/server.ts` and `apps/api/src/auth.ts`. Remove `/auth/capabilities` from `apps/api/src/app.ts`, `apps/app/src/lib/auth-capabilities.ts`, `apps/app/src/routes/forgot-password.tsx`, `apps/app/src/routes/reset-password.tsx`, `apps/app/src/components/recovery-screen.tsx`, and conditional controls in `apps/app/src/components/auth-screen.tsx`. Basic email/password auth remains. |
+| Trigger.dev | Delete `packages/jobs`; remove API package dependency, publisher setup in `apps/api/src/server.ts`, and `onProjectCreated` hook in `apps/api/src/app.ts`. Remove `jobs:dev`/`jobs:deploy` root scripts. Projects CRUD remains. |
+| Stripe | Delete `packages/billing` and `apps/api/src/billing.ts`; remove billing imports/options/routes from `apps/api/src/server.ts` and `app.ts` and API package dependency. Remove `apps/app/src/routes/billing.tsx`, `apps/app/src/lib/billing.ts`, `apps/app/src/billing-styles.css`, links in `apps/app/src/components/app-shell.tsx`, and billing copy in `apps/web/src/routes/index.tsx`. Remove `packages/db/src/billing-schema.ts` and billing exports from its `schema.ts` and `index.ts`. |
+
+For each removal, delete corresponding variables from `.env.example` and `turbo.json`, update relevant tests and package manifests, then run `bun install` to refresh `bun.lock`. For Stripe schema removal on an existing database, generate and review a **new** Drizzle migration, apply it to local PostgreSQL with `bun run db:migrate`, and keep previously applied migration history. After deleting frontend routes, regenerate `apps/app/src/routeTree.gen.ts` with `bun run --cwd apps/app build`. Finish with `bun run check`.
+
+For no landing site, remove `apps/web`, its root `dev:web`/`start:web` scripts and `dev` filter, and `VITE_WEB_ORIGIN` references. Projects CRUD is a removable sample: replace its table, repository, routes, UI, tests, seed, and related Trigger task with domain features; migrate deployed databases instead of rewriting applied SQL.
 
 ## Commands
 
@@ -97,8 +130,9 @@ Billing records demonstrate integration; they do not grant application entitleme
 | `bun run typecheck`, `test`, `check` | Typecheck, tests, or full verification |
 | `bun run db:up`, `db:down` | Start or stop local PostgreSQL |
 | `bun run db:generate`, `db:migrate`, `db:seed`, `db:studio` | Database workflow |
+| `bun run jobs:dev`, `jobs:deploy` | Optional Trigger.dev local worker and manual task deployment |
 
-`bun run check` runs lint, typecheck, tests, and production builds. CI performs the same checks after starting PostgreSQL and applying migrations.
+`bun run check` runs lint, typecheck, tests, and production builds. CI performs each check as a separate named step after starting PostgreSQL and applying migrations. CI needs no Stripe, Resend, Upstash, or Trigger.dev credentials. Deployment is host-specific; gate a deployment pipeline on CI success and run migrations against that environment's `DATABASE_URL` before rollout.
 
 ## Adapt the starter
 
@@ -110,6 +144,6 @@ Billing records demonstrate integration; they do not grant application entitleme
 
 ## Deployment notes
 
-Deploy API and landing output on Bun; deploy app output on Node. Root `start:*` commands set `NODE_ENV=production`. Provide server secrets only to API and migration jobs; app server needs its public and optional internal API origins. Set `VITE_` origins at frontend build time. Run committed migrations before starting revised API code. Keep app/API hosts on the same site or proxy API through app origin. Set explicit CORS origins and a fresh `BETTER_AUTH_SECRET`; serve public traffic over HTTPS. Protected app routes send `Cache-Control: private, no-store`; keep that policy at the hosting layer.
+Deploy API and landing output on Bun; deploy app output on Node. Root `start:*` commands set `NODE_ENV=production`. Provide server secrets only to API, migration jobs, and the optional Trigger worker; app server needs its public and optional internal API origins. Set `VITE_` origins at frontend build time. Run committed migrations before starting revised API code. Keep app/API hosts on the same site or proxy API through app origin. Set explicit CORS origins and a fresh `BETTER_AUTH_SECRET`; serve public traffic over HTTPS. Protected app routes send `Cache-Control: private, no-store`; keep that policy at the hosting layer.
 
 TanStack Start is currently a release candidate and its Vite hosting guide uses Nitro 3 beta; both are pinned to compatible published versions here. Validate host-specific output and cookie behavior before deploying. GitHub Actions workflow lives in `.github/workflows/ci.yml`.

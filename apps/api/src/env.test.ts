@@ -86,3 +86,13 @@ test("rejects insecure public production API origin", () => {
     }),
   ).toThrow();
 });
+
+test("validates structured logging level", () => {
+  expect(readApiEnvironment(valid).logLevel).toBe("info");
+  expect(readApiEnvironment({ ...valid, LOG_LEVEL: "debug" }).logLevel).toBe(
+    "debug",
+  );
+  expect(() => readApiEnvironment({ ...valid, LOG_LEVEL: "verbose" })).toThrow(
+    "LOG_LEVEL",
+  );
+});

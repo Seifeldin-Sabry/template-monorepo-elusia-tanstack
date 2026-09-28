@@ -4,9 +4,13 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:17.6-alpine
@@ -22,11 +26,27 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
-      - run: bun install --frozen-lockfile
-      - run: cp .env.example .env
-      - run: bun run db:migrate
-      - run: bun run check
+      - name: Set up Node for frontend builds
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Configure isolated CI environment
+        run: cp .env.example .env
+      - name: Apply committed migrations
+        run: bun run db:migrate
+      - name: Lint and format check
+        run: bun run lint
+      - name: Typecheck all workspaces
+        run: bun run typecheck
+      - name: Run unit and PostgreSQL integration tests
+        run: bun run test
+      - name: Build API and both frontends
+        run: bun run build

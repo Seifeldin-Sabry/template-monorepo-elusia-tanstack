@@ -8,10 +8,12 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "dotenvx run -f .env -- turbo dev",
+    "dev": "dotenvx run -f .env -- turbo dev --filter=@starter/api --filter=@starter/app --filter=@starter/web",
     "dev:api": "dotenvx run -f .env -- turbo dev --filter=@starter/api",
     "dev:app": "dotenvx run -f .env -- turbo dev --filter=@starter/app",
     "dev:web": "dotenvx run -f .env -- turbo dev --filter=@starter/web",
+    "jobs:dev": "dotenvx run -f .env -- bun run --cwd packages/jobs jobs:dev",
+    "jobs:deploy": "dotenvx run -f .env -- bun run --cwd packages/jobs jobs:deploy",
     "build": "dotenvx run -f .env -- turbo build",
     "start:api": "NODE_ENV=production dotenvx run -f .env -- bun run --no-env-file --cwd apps/api start",
     "start:app": "NODE_ENV=production dotenvx run -f .env -- bun run --no-env-file --cwd apps/app start",

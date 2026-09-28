@@ -9,12 +9,13 @@ import type {
   UpdateProjectInput,
 } from "./projects";
 
-const silentLogger: Logger = { info() {}, error() {} };
+const silentLogger: Logger = { info() {}, warn() {}, error() {} };
 const testUserId = "test-user-1";
 const allowedOrigin = "http://localhost:3000";
 
 function testAuth(userId: string | null = testUserId): AuthService {
   return {
+    emailEnabled: false,
     handler: async () => new Response("Not found", { status: 404 }),
     getSession: async () =>
       userId
@@ -295,5 +296,98 @@ describe("API contract", () => {
     expect(await response.json()).toEqual({
       error: { code: "INTERNAL_ERROR", message: "Unexpected server error." },
     });
+  });
+
+  test("logs actual response status and a request ID, including mounted auth", async () => {
+    const entries: Record<string, unknown>[] = [];
+    const logger: Logger = {
+      info: (entry) => entries.push(entry),
+      warn: (entry) => entries.push(entry),
+      error: (entry) => entries.push(entry),
+    };
+    const repository = memoryRepository();
+    repository.list = async () => {
+      throw new Error("secret database detail");
+    };
+    const app = createApp({
+      projects: repository,
+      auth: {
+        ...testAuth(),
+        handler: async () => new Response("Denied", { status: 418 }),
+      },
+      allowedOrigins: [allowedOrigin],
+      logger,
+    });
+
+    for (const [path, expectedStatus] of [
+      ["/health?ignore=secret", 200],
+      ["/projects", 500],
+      ["/api/auth/example", 418],
+    ] as const) {
+      const response = await app.handle(new Request(`http://localhost${path}`));
+      expect(response.status).toBe(expectedStatus);
+      expect(response.headers.get("x-request-id")).toBeTruthy();
+    }
+    await Bun.sleep(5);
+
+    const completed = entries.filter(
+      (entry) => entry.event === "request_complete",
+    );
+    expect(completed.map((entry) => entry.status)).toEqual([200, 500, 418]);
+    expect(completed[0]?.path).toBe("/health");
+    for (const entry of completed) {
+      expect(typeof entry.requestId).toBe("string");
+      expect(typeof entry.durationMs).toBe("number");
+    }
+    const exception = entries.find((entry) => entry.event === "request_error");
+    expect(exception?.err).toBeInstanceOf(Error);
+  });
+
+  test("leaves project creation successful if optional job enqueue fails", async () => {
+    const warnings: Record<string, unknown>[] = [];
+    const logger: Logger = {
+      info() {},
+      warn: (entry) => warnings.push(entry),
+      error() {},
+    };
+    const app = createApp({
+      projects: memoryRepository(),
+      auth: testAuth(),
+      allowedOrigins: [allowedOrigin],
+      logger,
+      onProjectCreated: async () => {
+        throw new Error("Trigger unavailable");
+      },
+    });
+
+    const created = await app.handle(
+      new Request("http://localhost/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: allowedOrigin },
+        body: JSON.stringify({ name: "Persisted" }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const project = await created.json();
+    expect(
+      (await app.handle(new Request("http://localhost/projects"))).status,
+    ).toBe(200);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.event).toBe("project_job_enqueue_failed");
+    expect(warnings[0]?.projectId).toBe(project.id);
+  });
+
+  test("advertises optional email capability without exposing credentials", async () => {
+    const app = createApp({
+      projects: memoryRepository(),
+      auth: { ...testAuth(), emailEnabled: true },
+      allowedOrigins: [allowedOrigin],
+      logger: silentLogger,
+    });
+    const response = await app.handle(
+      new Request("http://localhost/auth/capabilities"),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ emailEnabled: true });
   });
 });

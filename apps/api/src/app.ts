@@ -3,21 +3,11 @@ import type { BillingService } from "@starter/billing";
 import { Elysia, t } from "elysia";
 import type { AuthService } from "./auth";
 import { createBillingRoutes } from "./billing";
+import { jsonLogger, type Logger } from "./logger";
 import type { ProjectRepository } from "./projects";
 
+export type { Logger } from "./logger";
 export type { ProjectDto } from "./projects";
-
-type LogEntry = Record<string, string | number | boolean | null | undefined>;
-
-export type Logger = {
-  info(entry: LogEntry): void;
-  error(entry: LogEntry): void;
-};
-
-export const jsonLogger: Logger = {
-  info: (entry) => console.info(JSON.stringify({ level: "info", ...entry })),
-  error: (entry) => console.error(JSON.stringify({ level: "error", ...entry })),
-};
 
 export type AppOptions = {
   projects: ProjectRepository;
@@ -26,6 +16,10 @@ export type AppOptions = {
   allowedOrigins: string[];
   getClientIp?: (request: Request) => string | null;
   logger?: Logger;
+  onProjectCreated?: (event: {
+    projectId: string;
+    ownerId: string;
+  }) => void | Promise<void>;
 };
 
 const nameSchema = t.String({ minLength: 1, maxLength: 120, pattern: "\\S" });
@@ -44,6 +38,7 @@ export function createApp({
   allowedOrigins,
   getClientIp,
   logger = jsonLogger,
+  onProjectCreated,
 }: AppOptions) {
   const requestDetails = new WeakMap<
     Request,
@@ -101,25 +96,33 @@ export function createApp({
         requestId,
         method: request.method,
         path: new URL(request.url).pathname,
-        errorName: error instanceof Error ? error.name : "UnknownError",
+        err: error,
       });
       return status(500, {
         error: { code: "INTERNAL_ERROR", message: "Unexpected server error." },
       });
     })
-    .onAfterResponse(({ request, set }) => {
+    .onAfterResponse(({ request, set, responseValue }) => {
       const details = requestDetails.get(request);
+      const status =
+        responseValue instanceof Response
+          ? responseValue.status
+          : typeof set.status === "number"
+            ? set.status
+            : 200;
       logger.info({
         event: "request_complete",
         requestId: details?.id,
         method: request.method,
         path: new URL(request.url).pathname,
-        status: typeof set.status === "number" ? set.status : 200,
+        status,
         durationMs: details
           ? Math.round(performance.now() - details.startedAt)
           : undefined,
       });
+      requestDetails.delete(request);
     })
+    .get("/auth/capabilities", () => ({ emailEnabled: auth.emailEnabled }))
     .mount(auth.handler)
     .macro({
       auth: {
@@ -177,6 +180,15 @@ export function createApp({
       "/projects",
       async ({ body, status, user }) => {
         const project = await projects.create(user.id, body);
+        try {
+          await onProjectCreated?.({ projectId: project.id, ownerId: user.id });
+        } catch (err) {
+          logger.warn({
+            event: "project_job_enqueue_failed",
+            projectId: project.id,
+            err,
+          });
+        }
         return status(201, project);
       },
       {
