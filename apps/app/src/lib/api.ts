@@ -8,7 +8,7 @@ export type Project = ProjectDto;
 const apiOrigin = createIsomorphicFn()
   .server(() =>
     httpOrigin(
-      process.env.API_INTERNAL_ORIGIN ?? process.env.API_ORIGIN,
+      process.env.API_INTERNAL_ORIGIN || process.env.API_ORIGIN,
       "API_INTERNAL_ORIGIN or API_ORIGIN",
     ),
   )

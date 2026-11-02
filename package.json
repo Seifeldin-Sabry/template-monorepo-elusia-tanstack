@@ -27,7 +27,9 @@
     "db:migrate": "dotenvx run -f .env -- turbo db:migrate --filter=@starter/db",
     "db:seed": "dotenvx run -f .env -- turbo db:seed --filter=@starter/db",
     "db:studio": "dotenvx run -f .env -- turbo db:studio --filter=@starter/db",
-    "check": "bun run lint && bun run typecheck && bun run test && bun run build"
+    "check": "bun run lint && bun run typecheck && bun run test && bun run build",
+    "secrets:set": "dotenvx set -f .env.production --no-native",
+    "secrets:fly": "bun scripts/fly-secrets.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

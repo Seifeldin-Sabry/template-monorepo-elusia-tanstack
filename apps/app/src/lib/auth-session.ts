@@ -25,7 +25,7 @@ export const getSessionUser = createServerFn({ method: "GET" }).handler(
   async (): Promise<SessionUser | null> => {
     setResponseHeader("Cache-Control", "private, no-store");
     const origin = httpOrigin(
-      process.env.API_INTERNAL_ORIGIN ?? process.env.API_ORIGIN,
+      process.env.API_INTERNAL_ORIGIN || process.env.API_ORIGIN,
       "API_INTERNAL_ORIGIN or API_ORIGIN",
     );
 

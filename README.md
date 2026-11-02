@@ -130,6 +130,8 @@ For a single app that also serves the landing page, remove `apps/web`, `fly.web.
 | `bun run lint`, `format`, `format:check` | Biome checks and formatting |
 | `bun run typecheck`, `test`, `check` | Typecheck, tests, or full verification |
 | `bun run db:up`, `db:down` | Start or stop local PostgreSQL |
+| `bun run secrets:set KEY value` | Encrypt a production secret into `.env.production` (no private key needed) |
+| `bun run secrets:fly [config] [file]` | Decrypt `.env.production` and stage all values as Fly secrets |
 | `bun run db:generate`, `db:migrate`, `db:seed`, `db:studio` | Database workflow |
 
 `bun run check` runs lint, typecheck, tests, and production builds. CI performs each check as a separate named step after starting PostgreSQL and applying migrations. CI needs no Stripe, Resend, or Upstash credentials. The optional `deploy` job ships to Fly after CI passes on `main`; see Fly.io deployment.
@@ -148,14 +150,16 @@ Three Fly apps deploy from the repository root, each with a root config: `fly.ap
 
 ```sh
 fly apps create <slug>-api && fly apps create <slug>-app && fly apps create <slug>-web
-fly secrets set -a <slug>-api DATABASE_URL=... BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
+bun run secrets:set DATABASE_URL "postgres://..."          # encrypts into .env.production
+bun run secrets:set BETTER_AUTH_SECRET "$(openssl rand -base64 32)"
+bun run secrets:fly          # decrypts and stages every value on <slug>-api
 fly deploy -c fly.api.toml   # release_command runs Drizzle migrations first
 fly deploy -c fly.app.toml
 fly deploy -c fly.web.toml
 fly certs add api.example.com -a <slug>-api   # likewise app.example.com, example.com
 ```
 
-Add optional `UPSTASH_*`, `QSTASH_*`, `RESEND_*`/`EMAIL_FROM`, and `STRIPE_*` secrets the same way. Non-secret origins live in each config's `[env]`; `VITE_` origins are `[build.args]` because they compile into frontend bundles. Use a Neon connection string for `DATABASE_URL`, in the same region as `primary_region`. API reads the client address from `Fly-Client-IP` when `FLY_APP_NAME` is present, because the socket peer is Fly's proxy; Better Auth rate limits would otherwise share one bucket. Point Stripe's webhook at `https://api.example.com/billing/webhook`. For automatic deploys, create a token with `fly tokens create org`, store it as GitHub secret `FLY_API_TOKEN`, and set repository variable `FLY_DEPLOY=true`.
+Production secrets live in committed, encrypted `.env.production` (dotenvx). `secrets:set` encrypts with the public key in that file, so anyone (or any agent) can add or rotate a value without being able to read the others. The private key stays in ignored `.env.keys`; back it up in a password manager. `secrets:fly` decrypts the file and stages every value on the API app (`fly secrets set --stage`, one argument per value, no shell quoting); the next `fly deploy` applies them. Add optional `UPSTASH_*`, `QSTASH_*`, `RESEND_API_KEY`/`EMAIL_FROM`, and `STRIPE_*` the same way. App and landing need no secrets. Non-secret origins live in each config's `[env]`; `VITE_` origins are `[build.args]` because they compile into frontend bundles. Use a Neon connection string for `DATABASE_URL`, in the same region as `primary_region`. API reads the client address from `Fly-Client-IP` when `FLY_APP_NAME` is present, because the socket peer is Fly's proxy; Better Auth rate limits would otherwise share one bucket. Point Stripe's webhook at `https://api.example.com/billing/webhook`. For automatic deploys, GitHub stores only two secrets: `FLY_API_TOKEN` (`fly tokens create org`) and `DOTENV_PRIVATE_KEY_PRODUCTION` (from `.env.keys`). Set repository variable `FLY_DEPLOY=true`. The deploy job stages secrets from `.env.production` before deploying, so adding a secret is a commit, not a dashboard edit.
 
 ## Deployment notes
 

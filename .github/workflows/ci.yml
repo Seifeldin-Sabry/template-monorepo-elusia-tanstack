@@ -52,8 +52,9 @@ jobs:
         run: bun run build
 
   deploy:
-    # Opt in per product: set repo variable FLY_DEPLOY=true and secret FLY_API_TOKEN
-    # (fly tokens create org). API deploys first so its release_command migrates.
+    # Opt in per product: set repo variable FLY_DEPLOY=true and secrets FLY_API_TOKEN
+    # (fly tokens create org) and DOTENV_PRIVATE_KEY_PRODUCTION (from .env.keys).
+    # API deploys first so its release_command migrates.
     needs: verify
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.FLY_DEPLOY == 'true'
     runs-on: ubuntu-latest
@@ -61,11 +62,21 @@ jobs:
     concurrency: deploy-production
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      # Only key GitHub stores; decrypts committed .env.production.
+      DOTENV_PRIVATE_KEY_PRODUCTION: ${{ secrets.DOTENV_PRIVATE_KEY_PRODUCTION }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
       - name: Set up flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Stage API secrets from encrypted .env.production
+        run: bun run secrets:fly
       - name: Deploy API and run migrations
         run: flyctl deploy --remote-only -c fly.api.toml
       - name: Deploy product app

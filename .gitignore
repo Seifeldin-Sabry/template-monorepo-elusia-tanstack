@@ -6,6 +6,8 @@ dist/
 .env
 .env.*
 !.env.example
+# Encrypted with dotenvx; the private key lives in .env.keys (ignored) or CI.
+!.env.production
 !.env.*.example
 .env.keys
 *.log
