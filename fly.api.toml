@@ -1,0 +1,41 @@
+# Deploy from repository root: fly deploy -c fly.api.toml
+# Secrets (fly secrets set -a starter-api ...): DATABASE_URL, BETTER_AUTH_SECRET,
+# and optional UPSTASH_*, QSTASH_*, RESEND_*, EMAIL_FROM, STRIPE_*.
+app = "starter-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+
+[deploy]
+  # Runs once per deploy in a temporary machine with the app's secrets.
+  release_command = "bun run --cwd packages/db db:migrate"
+
+[env]
+  API_HOST = "0.0.0.0"
+  API_PORT = "3001"
+  API_ORIGIN = "https://api.example.com"
+  APP_ORIGIN = "https://app.example.com"
+  CORS_ORIGINS = "https://app.example.com,https://example.com"
+  AUTH_COOKIE_DOMAIN = "example.com"
+  REDIS_KEY_NAMESPACE = "starter:prod"
+  LOG_LEVEL = "info"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # Stripe webhooks and QStash callbacks wake it anyway; one warm machine avoids cold auth.
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

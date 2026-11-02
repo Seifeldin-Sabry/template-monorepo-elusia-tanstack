@@ -1,5 +1,6 @@
 import { cors } from "@elysia/cors";
 import type { BillingService } from "@starter/billing";
+import { type JobQueue, projectCreatedPayloadSchema } from "@starter/jobs";
 import { Elysia, t } from "elysia";
 import type { AuthService } from "./auth";
 import { createBillingRoutes } from "./billing";
@@ -13,6 +14,8 @@ export type AppOptions = {
   projects: ProjectRepository;
   auth: AuthService;
   billing?: BillingService | null;
+  /** QStash queue whose signed callbacks land on POST /jobs/:name. */
+  jobs?: Pick<JobQueue, "enabled" | "verify"> | null;
   allowedOrigins: string[];
   getClientIp?: (request: Request) => string | null;
   logger?: Logger;
@@ -35,6 +38,7 @@ export function createApp({
   projects,
   auth,
   billing,
+  jobs,
   allowedOrigins,
   getClientIp,
   logger = jsonLogger,
@@ -158,6 +162,55 @@ export function createApp({
       }),
     )
     .get("/health", () => ({ status: "ok" as const }))
+    .post(
+      "/jobs/project-created",
+      async ({ request, status }) => {
+        if (!jobs?.enabled) {
+          return status(503, {
+            error: {
+              code: "JOBS_NOT_CONFIGURED",
+              message: "Jobs are not configured for this deployment.",
+            },
+          });
+        }
+        const body = await request.text();
+        const signature = request.headers.get("upstash-signature");
+        if (
+          !signature ||
+          !(await jobs.verify("project-created", signature, body))
+        ) {
+          return status(401, {
+            error: {
+              code: "INVALID_JOB_SIGNATURE",
+              message: "Job signature verification failed.",
+            },
+          });
+        }
+        const payload = projectCreatedPayloadSchema.safeParse(parseJson(body));
+        if (!payload.success) {
+          // Non-2xx makes QStash retry, then park the message in its DLQ.
+          return status(422, {
+            error: {
+              code: "INVALID_JOB_PAYLOAD",
+              message: "Job payload failed validation.",
+            },
+          });
+        }
+        // Re-read committed state: the project may have changed or been deleted.
+        const project = await projects.find(
+          payload.data.ownerId,
+          payload.data.projectId,
+        );
+        logger.info({
+          event: project
+            ? "project_job_processed"
+            : "project_job_target_missing",
+          projectId: payload.data.projectId,
+        });
+        return { received: true as const };
+      },
+      { parse: "none" },
+    )
     .get(
       "/projects",
       async ({ user }) => ({ projects: await projects.list(user.id) }),
@@ -240,6 +293,14 @@ export function createApp({
       },
       { params: idSchema, auth: true, mutationOrigin: true },
     );
+}
+
+function parseJson(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
 }
 
 export type App = ReturnType<typeof createApp>;

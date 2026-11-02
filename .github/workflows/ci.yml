@@ -50,3 +50,25 @@ jobs:
         run: bun run test
       - name: Build API and both frontends
         run: bun run build
+
+  deploy:
+    # Opt in per product: set repo variable FLY_DEPLOY=true and secret FLY_API_TOKEN
+    # (fly tokens create org). API deploys first so its release_command migrates.
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.FLY_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency: deploy-production
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy API and run migrations
+        run: flyctl deploy --remote-only -c fly.api.toml
+      - name: Deploy product app
+        run: flyctl deploy --remote-only -c fly.app.toml
+      - name: Deploy landing site
+        run: flyctl deploy --remote-only -c fly.web.toml

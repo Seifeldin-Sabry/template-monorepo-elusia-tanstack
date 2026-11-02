@@ -1,0 +1,26 @@
+# Deploy from repository root: fly deploy -c fly.app.toml
+app = "starter-app"
+primary_region = "iad"
+
+[build]
+  dockerfile = "apps/app/Dockerfile"
+
+  [build.args]
+    VITE_API_ORIGIN = "https://api.example.com"
+    VITE_APP_ORIGIN = "https://app.example.com"
+    VITE_WEB_ORIGIN = "https://example.com"
+
+[env]
+  API_ORIGIN = "https://api.example.com"
+  APP_ORIGIN = "https://app.example.com"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

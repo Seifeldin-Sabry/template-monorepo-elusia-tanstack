@@ -1,10 +1,10 @@
 # Groundwork
 
-Reusable full-stack starter with a Bun/Elysia API, two TanStack Start sites, and PostgreSQL. Projects CRUD shows the complete path from Drizzle through Elysia and typed Eden Treaty calls to a TanStack Query interface. Better Auth supplies email/password sessions. Optional integrations add Upstash Redis, Resend email, Trigger.dev jobs, and Stripe billing with both subscriptions and one-time purchases.
+Reusable full-stack starter with a Bun/Elysia API, two TanStack Start sites, and PostgreSQL (Neon in production), deployed to Fly.io. Projects CRUD shows the complete path from Drizzle through Elysia and typed Eden Treaty calls to a TanStack Query interface. Better Auth supplies email/password sessions. Optional integrations add Upstash Redis, Resend email, Upstash QStash jobs, and Stripe billing with both subscriptions and one-time purchases.
 
 ## First run
 
-Requires Bun 1.4.0, Docker with Compose, and Git. Node 20.20+ runs the product app's built server.
+Requires Bun 1.4.0, Docker with Compose, and Git.
 
 ```sh
 bun install --frozen-lockfile
@@ -29,7 +29,7 @@ PostgreSQL binds to localhost. If port 5432 is occupied, change `POSTGRES_PORT`,
 | `packages/billing` | Stripe checkout, customer portal, webhook reconciliation |
 | `packages/cache` | Optional Upstash Redis cache and Better Auth rate-limit storage |
 | `packages/email` | Optional Resend delivery for verification and password reset |
-| `packages/jobs` | Optional Trigger.dev background task example |
+| `packages/jobs` | Optional Upstash QStash job queue; API receives signed callbacks |
 | `packages/ui` | Shared shadcn-style controls, Tailwind tokens, brand settings |
 
 The app imports `@starter/api/contract` as a **type only** and calls API routes through Eden Treaty. Its browser bundle contains no database or API runtime module. Query options define one projects cache key; `useCreateProject`, `useUpdateProject`, and `useDeleteProject` await invalidation on success. Server rendering uses a request-scoped QueryClient and forwards the session cookie for API reads.
@@ -56,7 +56,8 @@ Copy `.env.example` to ignored `.env` for local development. In staging and prod
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Optional Upstash pair; both or neither |
 | `REDIS_KEY_NAMESPACE` | Redis key prefix to separate deployments |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Optional Resend credential and verified sender address; both or neither |
-| `TRIGGER_PROJECT_REF`, `TRIGGER_SECRET_KEY` | Optional Trigger.dev project and server key; both or neither |
+| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` | Optional QStash token and signing keys; all three or none |
+| `QSTASH_DEV` | `true` runs local QStash dev server with deterministic keys instead |
 | `LOG_LEVEL` | Minimum API JSON log level |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Optional Stripe test/live secret and signing secret |
 | `STRIPE_SUBSCRIPTION_PRICE_ID`, `STRIPE_ONE_TIME_PRICE_ID` | Server-owned recurring and one-time Price IDs |
@@ -93,17 +94,17 @@ Copy the printed `whsec_...` value into `STRIPE_WEBHOOK_SECRET`, restart API, th
 
 Billing records demonstrate integration; they do not grant application entitlements yet. Add an explicit server-side entitlement check for paid product features. For production billing, enable email verification/recovery and reconcile operational exceptions from Stripe Dashboard.
 
-### Trigger.dev jobs
+### QStash jobs
 
-Jobs are optional. With `TRIGGER_PROJECT_REF` and `TRIGGER_SECRET_KEY` unset, API runs without Trigger.dev and never publishes a task. With both set, creating a project attempts to enqueue a `project-created` task after the database write succeeds. The example task re-reads the committed project by owner and ID, then records a compact snapshot in Trigger.dev. Partial configuration fails at startup. Enqueue failure produces a warning while the saved project remains available; use a transactional outbox if future jobs must be delivered reliably.
+Jobs are optional. With no `QSTASH_*` values, API runs without a queue and never publishes. With all three set, creating a project publishes a `project-created` message after the database write succeeds. QStash then calls `POST {API_ORIGIN}/jobs/project-created`; API verifies the `Upstash-Signature` JWT against the raw body and that public URL, re-reads the committed project by owner and ID, and logs the outcome. Messages carry identifiers only, use a stable deduplication ID, and retry three times before landing in the QStash dead letter queue. Non-2xx responses trigger retries, so handlers must be idempotent. Partial configuration fails at startup. Enqueue failure produces a warning while the saved project remains available; use a transactional outbox if future jobs must be delivered reliably.
 
-Create a Trigger.dev project and authenticate its CLI once with `bunx trigger.dev@4.6.4 login`. Put its project ref and development secret key in local `.env`, then run `bun run jobs:dev` alongside `bun run dev`. Local worker reads `DATABASE_URL` from `.env`. For staging or production, configure `DATABASE_URL` inside the matching Trigger.dev environment, set matching Trigger secret in the API environment, and deploy tasks separately with `bun run jobs:deploy` (production default). Trigger CLI login and API secret key serve different purposes. Job commands stay separate from core development and CI, which need no Trigger credentials.
+Locally, set `QSTASH_DEV=true`: the SDK downloads and starts the QStash dev server on port 8080 and uses its deterministic keys, so callbacks reach `localhost:3001` without a tunnel. Dev mode is ignored when `NODE_ENV=production`. In production, copy the token and both signing keys from the Upstash console into API secrets. API itself is the worker; there is nothing separate to deploy. Add a job by extending `JobName`, adding a publish method in `packages/jobs/src/queue.ts`, and adding a matching signed route.
 
 ### Choose modules
 
 Core dependency path: product app calls the API through an Eden contract; API uses PostgreSQL through `packages/db`. Better Auth lives in the API and stores sessions in PostgreSQL. Both frontends share `packages/ui`; `apps/web` can be removed independently. API opts into `packages/cache`, `packages/email`, `packages/jobs`, and `packages/billing` at startup. Jobs use the database directly in their worker; billing owns its own database tables. Email and jobs have no dependency on each other.
 
-**Disable at runtime:** leave both Upstash, Resend, or Trigger credentials blank, or leave all four Stripe settings blank. Their packages remain installed, but core app still runs. Partial configuration fails fast. Keep provider secrets on API or worker servers, never in `VITE_` variables.
+**Disable at runtime:** leave Upstash Redis, Resend, or QStash credentials blank, or leave all four Stripe settings blank. Their packages remain installed, but core app still runs. Partial configuration fails fast. Keep provider secrets on API servers, never in `VITE_` variables.
 
 **Remove code from a derivative project:**
 
@@ -111,12 +112,12 @@ Core dependency path: product app calls the API through an Eden contract; API us
 | --- | --- |
 | Upstash | Delete `packages/cache`; remove `@starter/cache` from `apps/api/package.json`, `createCache` and `secondaryStorage` wiring from `apps/api/src/server.ts`, and cache type/option from `apps/api/src/auth.ts`. Set Better Auth rate-limit storage to `database`. |
 | Resend | Delete `packages/email`; remove API package dependency and email setup in `apps/api/src/server.ts` and `apps/api/src/auth.ts`. Remove `/auth/capabilities` from `apps/api/src/app.ts`, `apps/app/src/lib/auth-capabilities.ts`, `apps/app/src/routes/forgot-password.tsx`, `apps/app/src/routes/reset-password.tsx`, `apps/app/src/components/recovery-screen.tsx`, and conditional controls in `apps/app/src/components/auth-screen.tsx`. Basic email/password auth remains. |
-| Trigger.dev | Delete `packages/jobs`; remove API package dependency, publisher setup in `apps/api/src/server.ts`, and `onProjectCreated` hook in `apps/api/src/app.ts`. Remove `jobs:dev`/`jobs:deploy` root scripts. Projects CRUD remains. |
+| QStash | Delete `packages/jobs`; remove API package dependency, queue setup in `apps/api/src/server.ts`, and `jobs` option, `/jobs/project-created` route, and `onProjectCreated` hook in `apps/api/src/app.ts`. Projects CRUD remains. |
 | Stripe | Delete `packages/billing` and `apps/api/src/billing.ts`; remove billing imports/options/routes from `apps/api/src/server.ts` and `app.ts` and API package dependency. Remove `apps/app/src/routes/billing.tsx`, `apps/app/src/lib/billing.ts`, `apps/app/src/billing-styles.css`, links in `apps/app/src/components/app-shell.tsx`, and billing copy in `apps/web/src/routes/index.tsx`. Remove `packages/db/src/billing-schema.ts` and billing exports from its `schema.ts` and `index.ts`. |
 
 For each removal, delete corresponding variables from `.env.example` and `turbo.json`, update relevant tests and package manifests, then run `bun install` to refresh `bun.lock`. For Stripe schema removal on an existing database, generate and review a **new** Drizzle migration, apply it to local PostgreSQL with `bun run db:migrate`, and keep previously applied migration history. After deleting frontend routes, regenerate `apps/app/src/routeTree.gen.ts` with `bun run --cwd apps/app build`. Finish with `bun run check`.
 
-For no landing site, remove `apps/web`, its root `dev:web`/`start:web` scripts and `dev` filter, and `VITE_WEB_ORIGIN` references. Projects CRUD is a removable sample: replace its table, repository, routes, UI, tests, seed, and related Trigger task with domain features; migrate deployed databases instead of rewriting applied SQL.
+For a single app that also serves the landing page, remove `apps/web`, `fly.web.toml`, the CI "Deploy landing site" step, its `turbo.json` tasks, and root `dev:web`/`start:web` scripts and `dev` filter; point `VITE_WEB_ORIGIN` at the app origin and add public routes to `apps/app`. Projects CRUD is a removable sample: replace its table, repository, routes, UI, tests, seed, and related job with domain features; migrate deployed databases instead of rewriting applied SQL.
 
 ## Commands
 
@@ -130,9 +131,8 @@ For no landing site, remove `apps/web`, its root `dev:web`/`start:web` scripts a
 | `bun run typecheck`, `test`, `check` | Typecheck, tests, or full verification |
 | `bun run db:up`, `db:down` | Start or stop local PostgreSQL |
 | `bun run db:generate`, `db:migrate`, `db:seed`, `db:studio` | Database workflow |
-| `bun run jobs:dev`, `jobs:deploy` | Optional Trigger.dev local worker and manual task deployment |
 
-`bun run check` runs lint, typecheck, tests, and production builds. CI performs each check as a separate named step after starting PostgreSQL and applying migrations. CI needs no Stripe, Resend, Upstash, or Trigger.dev credentials. Deployment is host-specific; gate a deployment pipeline on CI success and run migrations against that environment's `DATABASE_URL` before rollout.
+`bun run check` runs lint, typecheck, tests, and production builds. CI performs each check as a separate named step after starting PostgreSQL and applying migrations. CI needs no Stripe, Resend, or Upstash credentials. The optional `deploy` job ships to Fly after CI passes on `main`; see Fly.io deployment.
 
 ## Adapt the starter
 
@@ -142,8 +142,23 @@ For no landing site, remove `apps/web`, its root `dev:web`/`start:web` scripts a
 4. Add a typed Eden operation, TanStack Query key/options, mutation hook with awaited invalidation, and app route. Keep server secrets out of browser imports.
 5. Add focused validation, database, and typed-client tests. Projects is a removable example; delete its route, repository, and table after replacing it.
 
+## Fly.io deployment
+
+Three Fly apps deploy from the repository root, each with a root config: `fly.api.toml` (Bun API), `fly.app.toml` (Bun product app), and `fly.web.toml` (Bun landing site). Dockerfiles live in each app directory and use the repository root as build context. Replace `starter-*` app names, `example.com` hosts, and region in all three configs, then:
+
+```sh
+fly apps create <slug>-api && fly apps create <slug>-app && fly apps create <slug>-web
+fly secrets set -a <slug>-api DATABASE_URL=... BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
+fly deploy -c fly.api.toml   # release_command runs Drizzle migrations first
+fly deploy -c fly.app.toml
+fly deploy -c fly.web.toml
+fly certs add api.example.com -a <slug>-api   # likewise app.example.com, example.com
+```
+
+Add optional `UPSTASH_*`, `QSTASH_*`, `RESEND_*`/`EMAIL_FROM`, and `STRIPE_*` secrets the same way. Non-secret origins live in each config's `[env]`; `VITE_` origins are `[build.args]` because they compile into frontend bundles. Use a Neon connection string for `DATABASE_URL`, in the same region as `primary_region`. API reads the client address from `Fly-Client-IP` when `FLY_APP_NAME` is present, because the socket peer is Fly's proxy; Better Auth rate limits would otherwise share one bucket. Point Stripe's webhook at `https://api.example.com/billing/webhook`. For automatic deploys, create a token with `fly tokens create org`, store it as GitHub secret `FLY_API_TOKEN`, and set repository variable `FLY_DEPLOY=true`.
+
 ## Deployment notes
 
-Deploy API and landing output on Bun; deploy app output on Node. Root `start:*` commands set `NODE_ENV=production`. Provide server secrets only to API, migration jobs, and the optional Trigger worker; app server needs its public and optional internal API origins. Set `VITE_` origins at frontend build time. Run committed migrations before starting revised API code. Keep app/API hosts on the same site or proxy API through app origin. Set explicit CORS origins and a fresh `BETTER_AUTH_SECRET`; serve public traffic over HTTPS. Protected app routes send `Cache-Control: private, no-store`; keep that policy at the hosting layer.
+Deploy all three outputs on Bun; Nitro selects its Bun preset when built with Bun. Root `start:*` commands set `NODE_ENV=production`. Provide server secrets only to API and migration jobs; app server needs its public and optional internal API origins. Set `VITE_` origins at frontend build time. Run committed migrations before starting revised API code. Keep app/API hosts on the same site or proxy API through app origin. Set explicit CORS origins and a fresh `BETTER_AUTH_SECRET`; serve public traffic over HTTPS. Protected app routes send `Cache-Control: private, no-store`; keep that policy at the hosting layer.
 
 TanStack Start is currently a release candidate and its Vite hosting guide uses Nitro 3 beta; both are pinned to compatible published versions here. Validate host-specific output and cookie behavior before deploying. GitHub Actions workflow lives in `.github/workflows/ci.yml`.

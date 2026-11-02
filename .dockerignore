@@ -1,0 +1,11 @@
+**/node_modules
+**/.turbo
+**/dist
+**/.output
+**/.tanstack
+.git
+.env
+.env.*
+!.env.example
+.omc
+coverage

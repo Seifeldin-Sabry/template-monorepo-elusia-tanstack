@@ -42,8 +42,10 @@
         "LOG_LEVEL",
         "RESEND_API_KEY",
         "EMAIL_FROM",
-        "TRIGGER_PROJECT_REF",
-        "TRIGGER_SECRET_KEY",
+        "QSTASH_TOKEN",
+        "QSTASH_CURRENT_SIGNING_KEY",
+        "QSTASH_NEXT_SIGNING_KEY",
+        "QSTASH_DEV",
         "UPSTASH_REDIS_REST_URL",
         "UPSTASH_REDIS_REST_TOKEN",
         "REDIS_KEY_NAMESPACE",
@@ -88,8 +90,10 @@
         "LOG_LEVEL",
         "RESEND_API_KEY",
         "EMAIL_FROM",
-        "TRIGGER_PROJECT_REF",
-        "TRIGGER_SECRET_KEY",
+        "QSTASH_TOKEN",
+        "QSTASH_CURRENT_SIGNING_KEY",
+        "QSTASH_NEXT_SIGNING_KEY",
+        "QSTASH_DEV",
         "STRIPE_SECRET_KEY",
         "STRIPE_WEBHOOK_SECRET",
         "STRIPE_SUBSCRIPTION_PRICE_ID",
@@ -113,5 +117,6 @@
       "persistent": true,
       "env": ["DATABASE_URL"]
     }
-  }
+  },
+  "globalPassThroughEnv": ["FLY_APP_NAME"]
 }

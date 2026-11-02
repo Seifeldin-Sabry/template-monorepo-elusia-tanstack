@@ -356,7 +356,7 @@ describe("API contract", () => {
       allowedOrigins: [allowedOrigin],
       logger,
       onProjectCreated: async () => {
-        throw new Error("Trigger unavailable");
+        throw new Error("Queue unavailable");
       },
     });
 
@@ -375,6 +375,58 @@ describe("API contract", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.event).toBe("project_job_enqueue_failed");
     expect(warnings[0]?.projectId).toBe(project.id);
+  });
+
+  test("job callbacks require a valid QStash signature and payload", async () => {
+    const repository = memoryRepository();
+    const project = await repository.create(testUserId, { name: "Queued" });
+    const processed: Record<string, unknown>[] = [];
+    const app = createApp({
+      projects: repository,
+      auth: testAuth(null),
+      allowedOrigins: [allowedOrigin],
+      logger: { info: (entry) => processed.push(entry), warn() {}, error() {} },
+      jobs: {
+        enabled: true,
+        verify: async (_job, signature) => signature === "valid",
+      },
+    });
+    const callback = (signature: string | null, body: unknown) =>
+      app.handle(
+        new Request("http://localhost/jobs/project-created", {
+          method: "POST",
+          headers: signature ? { "Upstash-Signature": signature } : {},
+          body: JSON.stringify(body),
+        }),
+      );
+    const payload = { projectId: project.id, ownerId: testUserId };
+
+    expect((await callback(null, payload)).status).toBe(401);
+    expect((await callback("forged", payload)).status).toBe(401);
+    expect((await callback("valid", { projectId: "bad" })).status).toBe(422);
+    const accepted = await callback("valid", payload);
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ received: true });
+    expect(
+      processed.find((entry) => entry.event === "project_job_processed")
+        ?.projectId,
+    ).toBe(project.id);
+  });
+
+  test("job callbacks report unavailable when queue is off", async () => {
+    const app = createApp({
+      projects: memoryRepository(),
+      auth: testAuth(),
+      allowedOrigins: [allowedOrigin],
+      logger: silentLogger,
+    });
+    const response = await app.handle(
+      new Request("http://localhost/jobs/project-created", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    expect(response.status).toBe(503);
   });
 
   test("advertises optional email capability without exposing credentials", async () => {
